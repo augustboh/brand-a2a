@@ -69,7 +69,7 @@ def add_record(asin):
     product_info = api.query(asin, history=False)[0]
     category_tree = product_info.get('categoryTree')
     product_name = product_info.get('title')
-    product_category = category_tree[0]['name']
+    product_category = category_tree[0]['name'] if category_tree else 'Unknown'
     brand = product_info.get('brand')
 
     time.sleep(2)
