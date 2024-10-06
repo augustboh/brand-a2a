@@ -11,7 +11,7 @@ table_id_or_name = "tblHEM0cyX7qV3r0N"
 
 
 parms = {
-    "monthlySold_gte": 250,
+    "monthlySold_gte": 100,
     "current_BUY_BOX_SHIPPING_gte": 1500,
     "deltaPercent7_BUY_BOX_SHIPPING_gte": 35,
     "deltaPercent90_BUY_BOX_SHIPPING_gte": 35,
