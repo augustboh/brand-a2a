@@ -71,6 +71,8 @@ def add_record(asin):
     product_name = product_info.get('title')
     product_category = category_tree[0]['name'] if category_tree else 'Unknown'
     brand = product_info.get('brand')
+    bilm = product_info.get('monthlySold')
+    
 
     time.sleep(2)
     api.wait_for_tokens()
@@ -96,7 +98,8 @@ def add_record(asin):
                     "Brand": brand if isinstance(brand, str) else list(brand),
                     "Linked Brand": brand if isinstance(brand, str) else list(brand),
                     "Category": product_category if isinstance(product_category, str) else list(product_category),
-                    "Date Added": current_date
+                    "Date Added": current_date,
+                    "BILM": bilm
                 }
             }
         ],
