@@ -72,6 +72,13 @@ def add_record(asin):
     product_category = category_tree[0]['name'] if category_tree else 'Unknown'
     brand = product_info.get('brand')
     bilm = product_info.get('monthlySold')
+    amazon_seller = product_info.get('availabilityAmazon')
+    
+    who_is_seller = ''
+    if amazon_seller == -1:
+        who_is_seller == "Amazon"
+    else:
+        who_is_seller == "Other"   
     
 
     time.sleep(2)
@@ -99,7 +106,8 @@ def add_record(asin):
                     "Linked Brand": brand if isinstance(brand, str) else list(brand),
                     "Category": product_category if isinstance(product_category, str) else list(product_category),
                     "Date Added": current_date,
-                    "BILM": bilm
+                    "BILM": bilm,
+                    Seller: who_is_seller if isinstance(who_is_seller, str) else list(who_is_seller),
                 }
             }
         ],
