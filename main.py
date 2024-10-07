@@ -10,7 +10,7 @@ base_id = "applWV4PtK1OiEbS4"
 table_id_or_name = "tblHEM0cyX7qV3r0N"
 
 
-parms = {
+a2a_parms = {
     "monthlySold_gte": 100,
     "current_BUY_BOX_SHIPPING_gte": 1500,
     "deltaPercent7_BUY_BOX_SHIPPING_gte": 35,
@@ -34,10 +34,40 @@ parms = {
 
 }
 
+lightning_deal_parms = {
+    "monthlySold_gte": 100,
+    "current_BUY_BOX_SHIPPING_gte": 1500,
+    "current_LIGHTNING_DEAL_gte": 100,
+    "sort": [
+        [
+            "monthlySold",
+            "desc"
+        ]
+    ],
+    "productType": [
+        0,
+        1,
+        2
+    ],
+    "page": 0,
+    "perPage": 100
+}
+
+
+def lightning_deal_query():
+    response = requests.post(api_endpoint, json=a2a_parms)
+    asin_list = response.json().get('asinList', [])
+    for asin in asin_list:
+        api.wait_for_tokens()
+        product_info = api.query(asin, history=False)[0]
+        
+        with open('all_asins.txt', 'a') as file:
+            file.write(asin + '\n')
+
 
 
 def query_api():
-        response = requests.post(api_endpoint, json=parms)
+        response = requests.post(api_endpoint, json=a2a_parms)
         asin_list = response.json().get('asinList', [])
         for product in asin_list:
             with open('all_asins.txt', 'a') as file:
@@ -76,9 +106,9 @@ def add_record(asin):
     
     who_is_seller = ''
     if amazon_seller == -1:
-        who_is_seller == "Amazon"
+        who_is_seller = "Amazon"
     else:
-        who_is_seller == "Other"   
+        who_is_seller = "Other"   
     
 
     time.sleep(2)
