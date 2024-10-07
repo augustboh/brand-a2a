@@ -4,124 +4,78 @@ import time
 from datetime import date
 import json
 
-api_endpoint = 'https://api.keepa.com/query?domain=1&key=ca82bdg9afv8kf35b23t5813tgnpeb6jmck42pjq34j2pd2n39u7mg5estjcb4do'
-api = keepa.Keepa("ca82bdg9afv8kf35b23t5813tgnpeb6jmck42pjq34j2pd2n39u7mg5estjcb4do")
+# API configurations
+api_endpoint = 'https://api.keepa.com/query?domain=1&key=73hq89k6akkfd9ou2bs2snsiaip7kcm958bo79p3hmq0lf1a2m0l0ajiddp3vj8u'
+api = keepa.Keepa("73hq89k6akkfd9ou2bs2snsiaip7kcm958bo79p3hmq0lf1a2m0l0ajiddp3vj8u")
 base_id = "applWV4PtK1OiEbS4"
 table_id_or_name = "tblHEM0cyX7qV3r0N"
 
-
+# API parameters
 a2a_parms = {
     "monthlySold_gte": 100,
     "current_BUY_BOX_SHIPPING_gte": 1500,
     "deltaPercent7_BUY_BOX_SHIPPING_gte": 35,
     "deltaPercent90_BUY_BOX_SHIPPING_gte": 35,
-    "brand": [
-        "✜amazon"
-    ],
-    "sort": [
-        [
-            "current_SALES",
-            "asc"
-        ]
-    ],
-    "productType": [
-        0,
-        1,
-        2
-    ],
-    "perPage": 100,
+    "brand": ["✜amazon"],
+    "sort": [["current_SALES", "asc"]],
+    "productType": [0, 1, 2],
+    "perPage": 2000,
     "page": 0
-
 }
 
 lightning_deal_parms = {
     "monthlySold_gte": 100,
-    "current_BUY_BOX_SHIPPING_gte": 1500,
+    "current_BUY_BOX_SHIPPING_gte": 1800,
     "current_LIGHTNING_DEAL_gte": 100,
-    "sort": [
-        [
-            "monthlySold",
-            "desc"
-        ]
-    ],
-    "productType": [
-        0,
-        1,
-        2
-    ],
+    "sort": [["monthlySold", "desc"]],
+    "productType": [0, 1, 2],
     "page": 0,
-    "perPage": 100
+    "perPage": 2000
 }
 
-
-def lightning_deal_query():
-    response = requests.post(api_endpoint, json=a2a_parms)
-    asin_list = response.json().get('asinList', [])
-    for asin in asin_list:
-        api.wait_for_tokens()
-        product_info = api.query(asin, history=False)[0]
-        
-        with open('all_asins.txt', 'a') as file:
-            file.write(asin + '\n')
-
-
-
-def query_api():
-        response = requests.post(api_endpoint, json=a2a_parms)
-        asin_list = response.json().get('asinList', [])
-        for product in asin_list:
-            with open('all_asins.txt', 'a') as file:
-                file.write(product + '\n')
-
-def read_file_to_list(file_path):
-    with open(file_path, 'r') as file:
-        lines = file.readlines()
-        return [line.strip() for line in lines]
-
-def get_unique_asins(prior_asins, current_asins):
-    unique_asins = {}
-    for asin in current_asins:
-        if asin not in prior_asins:
-            unique_asins[asin] = True
-    return unique_asins
-
-def compare_asins():
-    prior_asins = read_file_to_list('prior_asins.txt')
-    current_asins = read_file_to_list('all_asins.txt')
+def calculate_price_drop(product_info):
+    lightning_price = product_info.get('stats_parsed', {}).get('current', {}).get('LIGHTNING_DEAL')
+    list_price = product_info.get('stats_parsed', {}).get('avg30', {}).get('LISTPRICE')
     
-    unique_asins = get_unique_asins(prior_asins, current_asins)
-    for asin in unique_asins:
-        add_record(asin)
+    if lightning_price is not None and list_price is not None and list_price != 0:
+        return lightning_price / list_price
+    else:
+        return 0  # Return 1 if we can't calculate the price drop
 
-                    
-def add_record(asin):
-    api.wait_for_tokens()
-    product_info = api.query(asin, history=False)[0]
+def read_file_to_set(filename):
+    with open(filename, 'r') as file:
+        return set(line.strip() for line in file)
+
+def write_set_to_file(filename, data_set):
+    with open(filename, 'w') as file:
+        for item in data_set:
+            file.write(f"{item}\n")
+
+def query_api(params):
+    response = requests.post(api_endpoint, json=params)
+    return set(response.json().get('asinList', []))
+
+def get_product_info(asin):
+    return api.query(asin, stats=30)[0]
+
+def add_record_to_airtable(asin, product_info):
+    print(f"Adding record for ASIN: {asin}")
     category_tree = product_info.get('categoryTree')
     product_name = product_info.get('title')
     product_category = category_tree[0]['name'] if category_tree else 'Unknown'
     brand = product_info.get('brand')
-    bilm = product_info.get('monthlySold')
-    amazon_seller = product_info.get('availabilityAmazon')
-    
-    who_is_seller = ''
-    if amazon_seller == -1:
-        who_is_seller = "Amazon"
-    else:
-        who_is_seller = "Other"   
-    
+    bilm = product_info.get('monthlySold')    
+    who_is_seller = "Amazon" if product_info.get('availabilityAmazon') == -1 else "Other"
 
     time.sleep(2)
     api.wait_for_tokens()
     token = "pat7dKdVUXa2sTH35.492d2d4be222c0e9fc575e72be5720827e9726c958152dc7b68d9c01c7995f1b"
 
-    # API endpoint
     url = f"https://api.airtable.com/v0/{base_id}/{table_id_or_name}"
 
-    # Request headers
     headers = {
-    "Authorization": f"Bearer {token}",
-    "Content-Type": "application/json"
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
     }
 
     current_date = date.today().isoformat()
@@ -130,14 +84,14 @@ def add_record(asin):
         "records": [
             {
                 "fields": {
-                    "ASIN": asin if isinstance(asin, str) else list(asin),
-                    "Product Name": product_name if isinstance(product_name, str) else list(product_name),
-                    "Brand": brand if isinstance(brand, str) else list(brand),
-                    "Linked Brand": brand if isinstance(brand, str) else list(brand),
-                    "Category": product_category if isinstance(product_category, str) else list(product_category),
+                    "ASIN": asin,
+                    "Product Name": product_name,
+                    "Brand": brand,
+                    "Linked Brand": brand,
+                    "Category": product_category,
                     "Date Added": current_date,
                     "BILM": bilm,
-                    "Seller": who_is_seller if isinstance(who_is_seller, str) else list(who_is_seller)
+                    "Seller": who_is_seller
                 }
             }
         ],
@@ -145,25 +99,52 @@ def add_record(asin):
     }
     
     time.sleep(2)
-    # Make the POST request
     response = requests.post(url, headers=headers, data=json.dumps(payload))
 
-    # Check the response
     if response.status_code == 200:
-        print("Request successful!")
-        print(response.json())
+        print(f"Record added successfully for ASIN: {asin}")
     else:
-        print(f"Request failed with status code: {response.status_code}")
+        print(f"Failed to add record for ASIN: {asin}. Status code: {response.status_code}")
         print(response.text)
 
-    
 def main():
-    with open('all_asins.txt', 'r') as all_asins_file:
-        with open('prior_asins.txt', 'w') as prior_asins_file:
-            prior_asins_file.write(all_asins_file.read())
+    # Read prior ASINs
+    prior_asins = read_file_to_set('prior_asins.txt')
     
-    open('all_asins.txt', 'w').close()
-    query_api()
-    compare_asins()
+    # Query API for new ASINs
+    lightning_asins = query_api(lightning_deal_parms)
+    a2a_asins = query_api(a2a_parms)
     
-main()
+    # Combine and filter new ASINs
+    all_new_asins = (lightning_asins | a2a_asins) - prior_asins
+    print(f"Total new ASINs: {len(all_new_asins)}")
+    
+    # Process new ASINs
+    valid_asins = set()
+    for asin in all_new_asins:
+        product_info = get_product_info(asin)
+        
+        if asin in lightning_asins:
+            price_drop = calculate_price_drop(product_info)
+            if price_drop < 0.7:
+                valid_asins.add(asin)
+                print(f"ASIN {asin} qualifies for lightning deal (price drop: {price_drop:.2f})")
+            else:
+                print(f"ASIN {asin} does not qualify for lightning deal (price drop: {price_drop:.2f})")
+        else:
+            valid_asins.add(asin)
+            print(f"ASIN {asin} qualifies for a2a parameters")
+        
+        # Add to Airtable
+        add_record_to_airtable(asin, product_info)
+    
+    # Update prior_asins and all_asins files
+    prior_asins |= valid_asins
+    write_set_to_file('prior_asins.txt', prior_asins)
+    write_set_to_file('all_asins.txt', valid_asins)
+    
+    print(f"Added {len(valid_asins)} new ASINs to Airtable")
+    print("Process completed")
+
+if __name__ == "__main__":
+    main()
