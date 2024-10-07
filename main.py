@@ -107,7 +107,7 @@ def add_record(asin):
                     "Category": product_category if isinstance(product_category, str) else list(product_category),
                     "Date Added": current_date,
                     "BILM": bilm,
-                    Seller: who_is_seller if isinstance(who_is_seller, str) else list(who_is_seller),
+                    "Seller": who_is_seller if isinstance(who_is_seller, str) else list(who_is_seller)
                 }
             }
         ],
