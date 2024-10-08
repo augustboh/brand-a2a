@@ -3,6 +3,8 @@ import keepa
 import time
 from datetime import date
 import json
+from requests.exceptions import ReadTimeout
+from urllib3.exceptions import ReadTimeoutError
 
 # API configurations
 api_endpoint = 'https://api.keepa.com/query?domain=1&key=ca82bdg9afv8kf35b23t5813tgnpeb6jmck42pjq34j2pd2n39u7mg5estjcb4do'
@@ -33,6 +35,31 @@ lightning_deal_parms = {
     "perPage": 2000
 }
 
+sub_and_save_parms = {
+    "monthlySold_gte": 300,
+    "current_BUY_BOX_SHIPPING_gte": 1500,
+    "deltaPercent7_BUY_BOX_SHIPPING_gte": 25,
+    "deltaPercent30_BUY_BOX_SHIPPING_gte": 25,
+    "deltaPercent90_BUY_BOX_SHIPPING_gte": 25,
+    "couponSNSPercent_gte": 10,
+    "sort": [
+        [
+            "monthlySold",
+            "desc"
+        ]
+    ],
+    "lastOffersUpdate_gte": 7238128,
+    "productType": [
+        0,
+        1,
+        2
+    ],
+    "page": 0,
+    "perPage": 100
+}
+
+param_set = [a2a_parms, sub_and_save_parms]
+
 def calculate_price_drop(product_info):
     lightning_price = product_info.get('stats_parsed', {}).get('current', {}).get('LIGHTNING_DEAL')
     list_price = product_info.get('stats_parsed', {}).get('avg30', {}).get('LISTPRICE')
@@ -55,9 +82,20 @@ def query_api(params):
     response = requests.post(api_endpoint, json=params)
     return set(response.json().get('asinList', []))
 
-def get_product_info(asin):
-    #return api.query(asin, stats=30)[0]
-    return api.query(asin, history=False)[0]
+def get_product_info(asin, max_retries=3, retry_delay=5):
+    for attempt in range(max_retries):
+        try:
+            return api.query(asin, history=False)[0]
+        except (ReadTimeout, ReadTimeoutError) as e:
+            if attempt < max_retries - 1:
+                print(f"Timeout error occurred for ASIN {asin}. Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+            else:
+                print(f"Max retries reached for ASIN {asin}. Skipping this ASIN.")
+                return None
+        except Exception as e:
+            print(f"An unexpected error occurred for ASIN {asin}: {str(e)}")
+            return None
 
 
 def add_record_to_airtable(asin, product_info):
@@ -113,18 +151,22 @@ def main():
     # Read prior ASINs
     prior_asins = read_file_to_set('prior_asins.txt')
     
-    # Query API for new ASINs
-    #lightning_asins = query_api(lightning_deal_parms)
-    a2a_asins = query_api(a2a_parms)
+    all_new_asins = set()
+    for params in param_set:
+        new_asins = query_api(params)
+        all_new_asins.update(new_asins)
     
-    # Combine and filter new ASINs
-    all_new_asins = (a2a_asins) - prior_asins
+    all_new_asins -= prior_asins
     print(f"Total new ASINs: {len(all_new_asins)}")
     
     # Process new ASINs
     valid_asins = set()
     for asin in all_new_asins:
         product_info = get_product_info(asin)
+        
+        if product_info is None:
+            print(f"Skipping ASIN {asin} due to error in retrieving product info")
+            continue
         
         # if asin in lightning_asins:
         #     price_drop = calculate_price_drop(product_info)
