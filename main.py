@@ -5,8 +5,8 @@ from datetime import date
 import json
 
 # API configurations
-api_endpoint = 'https://api.keepa.com/query?domain=1&key=73hq89k6akkfd9ou2bs2snsiaip7kcm958bo79p3hmq0lf1a2m0l0ajiddp3vj8u'
-api = keepa.Keepa("73hq89k6akkfd9ou2bs2snsiaip7kcm958bo79p3hmq0lf1a2m0l0ajiddp3vj8u")
+api_endpoint = 'https://api.keepa.com/query?domain=1&key=ca82bdg9afv8kf35b23t5813tgnpeb6jmck42pjq34j2pd2n39u7mg5estjcb4do'
+api = keepa.Keepa("ca82bdg9afv8kf35b23t5813tgnpeb6jmck42pjq34j2pd2n39u7mg5estjcb4do")
 base_id = "applWV4PtK1OiEbS4"
 table_id_or_name = "tblHEM0cyX7qV3r0N"
 
@@ -56,7 +56,9 @@ def query_api(params):
     return set(response.json().get('asinList', []))
 
 def get_product_info(asin):
-    return api.query(asin, stats=30)[0]
+    #return api.query(asin, stats=30)[0]
+    return api.query(asin, history=False)[0]
+
 
 def add_record_to_airtable(asin, product_info):
     print(f"Adding record for ASIN: {asin}")
