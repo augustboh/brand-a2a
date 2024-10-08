@@ -112,11 +112,11 @@ def main():
     prior_asins = read_file_to_set('prior_asins.txt')
     
     # Query API for new ASINs
-    lightning_asins = query_api(lightning_deal_parms)
+    #lightning_asins = query_api(lightning_deal_parms)
     a2a_asins = query_api(a2a_parms)
     
     # Combine and filter new ASINs
-    all_new_asins = (lightning_asins | a2a_asins) - prior_asins
+    all_new_asins = (a2a_asins) - prior_asins
     print(f"Total new ASINs: {len(all_new_asins)}")
     
     # Process new ASINs
@@ -124,16 +124,16 @@ def main():
     for asin in all_new_asins:
         product_info = get_product_info(asin)
         
-        if asin in lightning_asins:
-            price_drop = calculate_price_drop(product_info)
-            if price_drop < 0.7:
-                valid_asins.add(asin)
-                print(f"ASIN {asin} qualifies for lightning deal (price drop: {price_drop:.2f})")
-            else:
-                print(f"ASIN {asin} does not qualify for lightning deal (price drop: {price_drop:.2f})")
-        else:
-            valid_asins.add(asin)
-            print(f"ASIN {asin} qualifies for a2a parameters")
+        # if asin in lightning_asins:
+        #     price_drop = calculate_price_drop(product_info)
+        #     if price_drop < 0.7:
+        #         valid_asins.add(asin)
+        #         print(f"ASIN {asin} qualifies for lightning deal (price drop: {price_drop:.2f})")
+        #     else:
+        #         print(f"ASIN {asin} does not qualify for lightning deal (price drop: {price_drop:.2f})")
+        # else:
+        valid_asins.add(asin)
+        print(f"ASIN {asin} qualifies for a2a parameters")
         
         # Add to Airtable
         add_record_to_airtable(asin, product_info)
