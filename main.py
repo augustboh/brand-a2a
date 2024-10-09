@@ -105,7 +105,7 @@ def add_record_to_airtable(asin, product_info):
     product_category = category_tree[0]['name'] if category_tree else 'Unknown'
     brand = product_info.get('brand')
     bilm = product_info.get('monthlySold')    
-    who_is_seller = "Amazon" if product_info.get('availabilityAmazon') == -1 else "Other"
+    who_is_seller = "Other" if product_info.get('availabilityAmazon') == -1 else "Amazon"
 
     time.sleep(2)
     api.wait_for_tokens()
