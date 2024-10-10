@@ -7,8 +7,8 @@ from requests.exceptions import ReadTimeout
 from urllib3.exceptions import ReadTimeoutError
 
 # API configurations
-api_endpoint = 'https://api.keepa.com/query?domain=1&key=ca82bdg9afv8kf35b23t5813tgnpeb6jmck42pjq34j2pd2n39u7mg5estjcb4do'
-api = keepa.Keepa("ca82bdg9afv8kf35b23t5813tgnpeb6jmck42pjq34j2pd2n39u7mg5estjcb4do")
+api_endpoint = 'https://api.keepa.com/query?domain=1&key=73hq89k6akkfd9ou2bs2snsiaip7kcm958bo79p3hmq0lf1a2m0l0ajiddp3vj8u'
+api = keepa.Keepa("73hq89k6akkfd9ou2bs2snsiaip7kcm958bo79p3hmq0lf1a2m0l0ajiddp3vj8u")
 base_id = "applWV4PtK1OiEbS4"
 table_id_or_name = "tblHEM0cyX7qV3r0N"
 
