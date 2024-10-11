@@ -153,43 +153,32 @@ def main():
     # Read prior ASINs
     prior_asins = read_file_to_set('prior_asins.txt')
     
-    all_new_asins = set()
+    all_current_asins = set()
     for params in param_set:
-        new_asins = query_api(params)
-        all_new_asins.update(new_asins)
+        current_asins = query_api(params)
+        all_current_asins.update(current_asins)
     
-    all_new_asins -= prior_asins
-    print(f"Total new ASINs: {len(all_new_asins)}")
+    new_asins = all_current_asins - prior_asins
+    print(f"Total new ASINs: {len(new_asins)}")
     
     # Process new ASINs
-    valid_asins = set()
-    for asin in all_new_asins:
+    for asin in new_asins:
         product_info = get_product_info(asin)
         
         if product_info is None:
             print(f"Skipping ASIN {asin} due to error in retrieving product info")
             continue
         
-        # if asin in lightning_asins:
-        #     price_drop = calculate_price_drop(product_info)
-        #     if price_drop < 0.7:
-        #         valid_asins.add(asin)
-        #         print(f"ASIN {asin} qualifies for lightning deal (price drop: {price_drop:.2f})")
-        #     else:
-        #         print(f"ASIN {asin} does not qualify for lightning deal (price drop: {price_drop:.2f})")
-        # else:
-        valid_asins.add(asin)
-        print(f"ASIN {asin} qualifies for a2a parameters")
+        print(f"ASIN {asin} is new and qualifies for parameters")
         
         # Add to Airtable
         add_record_to_airtable(asin, product_info)
     
-    # Update prior_asins and all_asins files
-    prior_asins |= valid_asins
-    write_set_to_file('prior_asins.txt', prior_asins)
-    write_set_to_file('all_asins.txt', valid_asins)
+    # Update prior_asins file with current ASINs
+    write_set_to_file('prior_asins.txt', all_current_asins)
     
-    print(f"Added {len(valid_asins)} new ASINs to Airtable")
+    print(f"Added {len(new_asins)} new ASINs to Airtable")
+    print(f"Removed {len(prior_asins - all_current_asins)} ASINs from prior_asins")
     print("Process completed")
 
 if __name__ == "__main__":
