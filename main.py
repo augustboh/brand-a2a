@@ -118,7 +118,9 @@ def add_record_to_airtable(asin, product_info):
         "Content-Type": "application/json"
     }
 
-    current_date = date.today().isoformat()
+    from datetime import datetime
+
+    current_date_time = datetime.now().strftime("%Y-%m-%dT%H:%M")
     
     payload = {
         "records": [
@@ -129,7 +131,7 @@ def add_record_to_airtable(asin, product_info):
                     "Brand": brand,
                     "Linked Brand": brand,
                     "Category": product_category,
-                    "Date Added": current_date,
+                    "Date Added": current_date_time,
                     "BILM": bilm,
                     "Seller": who_is_seller
                 }
