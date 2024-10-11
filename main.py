@@ -118,9 +118,9 @@ def add_record_to_airtable(asin, product_info):
         "Content-Type": "application/json"
     }
 
-    from datetime import datetime
+    from datetime import datetime, timezone
 
-    current_date_time = datetime.now().strftime("%Y-%m-%dT%H:%M")
+    current_date_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M")
     
     payload = {
         "records": [
