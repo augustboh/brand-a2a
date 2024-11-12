@@ -172,6 +172,7 @@ def main():
         print(f"ASIN {asin} is new and qualifies for parameters")
         
         # Add to Airtable
+        time.sleep(5)
         add_record_to_airtable(asin, product_info)
     
     # Update prior_asins file with current ASINs
