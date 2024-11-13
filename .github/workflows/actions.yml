@@ -3,10 +3,15 @@ name: run main.py
 on:
   schedule:
     - cron: '*/10 * * * *' 
-    
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true  # Cancels any running job when a new one starts
+  
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 9
     steps:
 
       - name: checkout repo content
