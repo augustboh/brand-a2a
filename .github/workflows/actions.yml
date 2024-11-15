@@ -5,8 +5,7 @@ on:
     - cron: '*/10 * * * *' 
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true  # Cancels any running job when a new one starts
+  group: ${{ github.workflow }}
   
 jobs:
   build:
