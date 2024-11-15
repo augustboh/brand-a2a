@@ -7,7 +7,6 @@ from requests.exceptions import ReadTimeout
 from urllib3.exceptions import ReadTimeoutError
 from itertools import cycle
 
-# API configurations
 api_keys = [
     "cuc7bq8dcfholhkeep8nnh1gf3khc9tv0f4pc3eetglsq3l1p5njcn186vje2jhd",
     "3aat0atkip5dp1gp7jr2js3ghpefkjvl68q7av1ncga0d6ipcd4cn2k7chqlf5b0",
@@ -24,7 +23,6 @@ current_key = None
 base_id = "applWV4PtK1OiEbS4"
 table_id_or_name = "tblHEM0cyX7qV3r0N"
 
-# API parameters
 a2a_parms = {
     "monthlySold_gte": 100,
     "current_BUY_BOX_SHIPPING_gte": 1500,
@@ -35,16 +33,6 @@ a2a_parms = {
     "productType": [0, 1, 2],
     "perPage": 2000,
     "page": 0
-}
-
-lightning_deal_parms = {
-    "monthlySold_gte": 100,
-    "current_BUY_BOX_SHIPPING_gte": 1800,
-    "current_LIGHTNING_DEAL_gte": 100,
-    "sort": [["monthlySold", "desc"]],
-    "productType": [0, 1, 2],
-    "page": 0,
-    "perPage": 2000
 }
 
 sub_and_save_parms = {
@@ -65,51 +53,56 @@ param_set = [a2a_parms, sub_and_save_parms]
 
 def initialize_api():
     global api, current_key
-    current_key = next(api_key_cycle)
-    print(f"[API] Initializing with key: {current_key[:8]}...")
-    api = keepa.Keepa(current_key)
-    print(f"[API] Tokens available: {api.tokens_left}")
+    while True:
+        current_key = next(api_key_cycle)
+        print(f"[API] Trying key: {current_key[:8]}...")
+        try:
+            api = keepa.Keepa(current_key)
+            # Use tokens_left directly instead of ping
+            if api.tokens_left > 20:
+                print(f"[API] Success! Tokens available: {api.tokens_left}")
+                return True
+            print(f"[API] No tokens available for key {current_key[:8]}")
+        except Exception as e:
+            print(f"[API] Error with key {current_key[:8]}: {str(e)}")
+        time.sleep(1)
 
 def check_and_rotate_api_key():
     if not api or api.tokens_left < 2:
-        print(f"[API] Low tokens ({api.tokens_left if api else 0}). Rotating key...")
-        initialize_api()
-        return True
-    return False
+        return initialize_api()
+    return True
 
-def wait_for_tokens_with_timeout(timeout=5):
+def wait_for_tokens_with_timeout(timeout=30):
     start_time = time.time()
-    if api and api.tokens_left:
-        return True
-        
-    keys_tried = 0
-    while keys_tried < len(api_keys):
+    keys_tried = set()
+    
+    while len(keys_tried) < len(api_keys):
         if time.time() - start_time > timeout:
             return False
-            
-        initialize_api()
-        keys_tried += 1
         
-        if api.tokens_left:
+        if check_and_rotate_api_key():
             return True
             
-        time.sleep(0.1)
+        if current_key:
+            keys_tried.add(current_key)
+        time.sleep(1)
     
     return False
 
-def calculate_price_drop(product_info):
-    lightning_price = product_info.get('stats_parsed', {}).get('current', {}).get('LIGHTNING_DEAL')
-    list_price = product_info.get('stats_parsed', {}).get('avg30', {}).get('LISTPRICE')
-    
-    if lightning_price is not None and list_price is not None and list_price != 0:
-        return lightning_price / list_price
-    else:
-        return 0
-
 def query_api(params):
+    if not check_and_rotate_api_key():
+        return set()
+        
     api_endpoint = f'https://api.keepa.com/query?domain=1&key={current_key}'
-    response = requests.post(api_endpoint, json=params)
-    return set(response.json().get('asinList', []))
+    try:
+        response = requests.post(api_endpoint, json=params)
+        if response.status_code != 200:
+            print(f"API Error: {response.status_code} - {response.text}")
+            return set()
+        return set(response.json().get('asinList', []))
+    except Exception as e:
+        print(f"Query error: {str(e)}")
+        return set()
 
 def get_product_info(asin, max_retries=3, retry_delay=5):
     for attempt in range(max_retries):
@@ -123,13 +116,12 @@ def get_product_info(asin, max_retries=3, retry_delay=5):
                 time.sleep(retry_delay)
             else:
                 print(f"Max retries reached for ASIN {asin}. Skipping.")
-                return None
         except Exception as e:
             print(f"Error for ASIN {asin}: {str(e)}")
             if "token" in str(e).lower():
                 initialize_api()
                 continue
-            return None
+        return None
 
 def add_record_to_airtable(asin, product_info):
     print(f"Adding record for ASIN: {asin}")
@@ -178,8 +170,11 @@ def add_record_to_airtable(asin, product_info):
         print(response.text)
 
 def read_file_to_set(filename):
-    with open(filename, 'r') as file:
-        return set(line.strip() for line in file)
+    try:
+        with open(filename, 'r') as file:
+            return set(line.strip() for line in file)
+    except FileNotFoundError:
+        return set()
 
 def write_set_to_file(filename, data_set):
     with open(filename, 'w') as file:
@@ -195,6 +190,8 @@ def main():
         if wait_for_tokens_with_timeout():
             current_asins = query_api(params)
             all_current_asins.update(current_asins)
+        else:
+            print("Failed to get tokens for query")
     
     new_asins = all_current_asins - prior_asins
     print(f"Total new ASINs: {len(new_asins)}")
