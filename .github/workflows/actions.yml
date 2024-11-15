@@ -14,7 +14,9 @@ jobs:
     steps:
 
       - name: checkout repo content
-        uses: actions/checkout@v2 # checkout the repository content to github runner
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0  # Get all history
 
       - name: setup python
         uses: actions/setup-python@v4
@@ -31,15 +33,11 @@ jobs:
           SOME_SECRET: ${{ secrets.SOME_SECRET }}
         run: python main.py
           
-      - name: commit files
+      - name: commit and push
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
+          git pull origin main  # Pull latest changes
           git add -A
           git diff-index --quiet HEAD || (git commit -a -m "updated logs" --allow-empty)
-          
-      - name: push changes
-        uses: ad-m/github-push-action@v0.6.0
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          branch: main 
+          git push origin main
