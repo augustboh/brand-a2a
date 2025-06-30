@@ -24,10 +24,10 @@ base_id = "applWV4PtK1OiEbS4"
 table_id_or_name = "tblHEM0cyX7qV3r0N"
 
 a2a_parms = {
-    "monthlySold_gte": 50,
+    "monthlySold_gte": 200,
     "current_BUY_BOX_SHIPPING_gte": 1500,
-    "deltaPercent7_BUY_BOX_SHIPPING_gte": 35,
-    "deltaPercent90_BUY_BOX_SHIPPING_gte": 35,
+    "deltaPercent7_BUY_BOX_SHIPPING_gte": 25,
+    "deltaPercent90_BUY_BOX_SHIPPING_gte": 25,
     "brand": ["✜amazon"],
     "sort": [["current_SALES", "asc"]],
     "productType": [0, 1, 2],
