@@ -28,6 +28,7 @@ a2a_parms = {
     "current_BUY_BOX_SHIPPING_gte": 1500,
     "deltaPercent7_BUY_BOX_SHIPPING_gte": 25,
     "deltaPercent90_BUY_BOX_SHIPPING_gte": 25,
+    "current_AMAZON_gte": 1500,
     "brand": ["✜amazon"],
     "sort": [["current_SALES", "asc"]],
     "productType": [0, 1, 2],
@@ -41,6 +42,7 @@ sub_and_save_parms = {
     "deltaPercent7_BUY_BOX_SHIPPING_gte": 25,
     "deltaPercent30_BUY_BOX_SHIPPING_gte": 25,
     "deltaPercent90_BUY_BOX_SHIPPING_gte": 25,
+    "current_AMAZON_gte": 1500,
     "couponSNSPercent_gte": 10,
     "sort": [["monthlySold", "desc"]],
     "lastOffersUpdate_gte": 7238128,
@@ -49,7 +51,23 @@ sub_and_save_parms = {
     "perPage": 100
 }
 
-param_set = [a2a_parms, sub_and_save_parms]
+electronics_parms = {
+    "monthlySold_gte": 200,
+    "current_BUY_BOX_SHIPPING_gte": 1500,
+    "deltaPercent7_BUY_BOX_SHIPPING_gte": 13,
+    "deltaPercent90_BUY_BOX_SHIPPING_gte": 10,
+    "current_AMAZON_gte": 1500,
+    "rootCategory": [
+        "172282"
+    ],
+    "brand": ["✜amazon"],
+    "sort": [["current_SALES", "asc"]],
+    "productType": [0, 1, 2],
+    "perPage": 2000,
+    "page": 0
+}
+
+param_set = [a2a_parms, sub_and_save_parms, electronics_parms]
 
 def initialize_api():
     global api, current_key
