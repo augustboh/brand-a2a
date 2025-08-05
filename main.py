@@ -67,7 +67,7 @@ electronics_parms = {
     "page": 0
 }
 
-param_set = [a2a_parms, sub_and_save_parms, electronics_parms]
+param_set = [a2a_parms, sub_and_save_parms]
 
 def initialize_api():
     global api, current_key
