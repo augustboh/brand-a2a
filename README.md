@@ -1,4 +1,4 @@
-# Brand A2A Product Tracking
+# A2A Product Tracking
 
 Automated system for tracking Amazon products using Keepa API and managing them in Airtable.
 
