@@ -10,15 +10,6 @@ Automated system for tracking Amazon products using Keepa API and managing them 
 - Tracks processed ASINs to avoid duplicates
 - Comprehensive logging and error handling
 
-## Prerequisites
-
-- Python 3.9 or higher
-- Keepa API keys (one or more)
-- Airtable account with:
-  - Base ID
-  - Table ID
-  - API token
-
 ## Installation
 
 1. Clone the repository:
@@ -67,8 +58,6 @@ RETRY_DELAY=5
 API_REQUEST_DELAY=2.0
 PRODUCT_PROCESSING_DELAY=5.0
 ```
-
-**Important:** The `.env` file is ignored by git (see `.gitignore`). Never commit your API keys!
 
 ### GitHub Actions / CI/CD
 
@@ -125,65 +114,6 @@ brand-a2a-1/
 └── README.md           # This file
 ```
 
-## Code Structure
 
-The application is organized into several classes:
 
-- **`Config`**: Manages configuration from environment variables
-- **`KeepaAPIManager`**: Handles Keepa API connections and key rotation
-- **`AirtableManager`**: Manages Airtable API interactions
-- **`FileManager`**: Handles file I/O operations
-
-## Logging
-
-The application uses Python's `logging` module for comprehensive logging. Logs include:
-- API initialization and key rotation
-- Query results and product processing
-- Success and error messages
-- Summary statistics
-
-## Error Handling
-
-The application includes robust error handling:
-- Automatic API key rotation when tokens are low
-- Retry logic for failed API requests
-- Timeout handling for long-running operations
-- Graceful degradation when API keys are unavailable
-
-## Best Practices Implemented
-
-- ✅ Environment variables for sensitive data (API keys, tokens)
-- ✅ Proper logging instead of print statements
-- ✅ Type hints for better code clarity
-- ✅ Docstrings for all functions and classes
-- ✅ Class-based architecture instead of global variables
-- ✅ Comprehensive error handling
-- ✅ Configuration validation
-- ✅ `.gitignore` to prevent committing sensitive files
-- ✅ Modular code structure
-
-## Troubleshooting
-
-### "Configuration errors" on startup
-- Ensure all required environment variables are set
-- Check that your `.env` file exists and is properly formatted
-- Verify API keys are comma-separated without spaces
-
-### "Failed to initialize Keepa API"
-- Check that your API keys are valid
-- Ensure at least one API key has available tokens
-- Verify your internet connection
-
-### "Failed to add record to Airtable"
-- Verify your Airtable credentials are correct
-- Check that the table structure matches expected fields
-- Ensure your API token has write permissions
-
-## License
-
-[Add your license information here]
-
-## Contributing
-
-[Add contribution guidelines here]
 
