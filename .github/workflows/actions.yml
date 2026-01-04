@@ -2,7 +2,7 @@ name: Run Brand A2A Script
 
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:  # Allow manual triggering
 
 concurrency:
@@ -30,6 +30,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
+          cache: 'pip'  # Cache pip dependencies
           
       - name: Install dependencies
         run: |
