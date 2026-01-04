@@ -69,7 +69,7 @@ class Config:
         """Get the query parameter sets for Keepa API."""
         return [
             {
-                "monthlySold_gte": 400,
+                "monthlySold_gte": 50,
                 "current_BUY_BOX_SHIPPING_gte": 1500,
                 "deltaPercent7_BUY_BOX_SHIPPING_gte": 25,
                 "deltaPercent90_BUY_BOX_SHIPPING_gte": 25,
@@ -79,20 +79,6 @@ class Config:
                 "productType": [0, 1, 2],
                 "perPage": 2000,
                 "page": 0
-            },
-            {
-                "monthlySold_gte": 300,
-                "current_BUY_BOX_SHIPPING_gte": 1500,
-                "deltaPercent7_BUY_BOX_SHIPPING_gte": 25,
-                "deltaPercent30_BUY_BOX_SHIPPING_gte": 25,
-                "deltaPercent90_BUY_BOX_SHIPPING_gte": 25,
-                "current_AMAZON_gte": 1500,
-                "couponSNSPercent_gte": 10,
-                "sort": [["monthlySold", "desc"]],
-                "lastOffersUpdate_gte": 7238128,
-                "productType": [0, 1, 2],
-                "page": 0,
-                "perPage": 100
             }
         ]
 
