@@ -119,20 +119,26 @@ class KeepaAPIManager:
             timeout = Config.TOKEN_WAIT_TIMEOUT
         
         start_time = time.time()
-        keys_tried = set()
+        retry_interval = 30  # Check every 30 seconds
         
-        while len(keys_tried) < len(self.api_keys):
-            if time.time() - start_time > timeout:
-                logger.error(f"Timeout waiting for tokens after {timeout} seconds")
-                return False
-            
-            if self.check_and_rotate_api_key():
+        while time.time() - start_time < timeout:
+            # Try to initialize with any available key
+            if self.initialize_api():
                 return True
             
-            if self.current_key:
-                keys_tried.add(self.current_key)
-            time.sleep(1)
+            # Calculate remaining time
+            elapsed = time.time() - start_time
+            remaining = timeout - elapsed
+            
+            if remaining > 0:
+                wait_time = min(retry_interval, remaining)
+                logger.info(
+                    f"No keys with sufficient tokens. Waiting {wait_time:.0f}s for regeneration... "
+                    f"({remaining:.0f}s remaining)"
+                )
+                time.sleep(wait_time)
         
+        logger.error(f"Timeout waiting for tokens after {timeout} seconds")
         return False
     
     def query_api(self, params: Dict[str, Any]) -> Set[str]:
@@ -742,104 +748,35 @@ class PriceStabilityAnalyzer:
         return list(filtered_timestamps), list(filtered_prices)
     
     @staticmethod
-    def calculate_drop_durations(
-        timestamps: List[datetime],
-        prices: List[float],
-        normal_price: float,
-        drop_threshold_percent: float = None
-    ) -> List[float]:
-        """
-        Calculate the duration of each drop period.
-        
-        Args:
-            timestamps: List of datetime timestamps
-            prices: List of prices corresponding to timestamps
-            normal_price: The "normal" price level
-            drop_threshold_percent: Percentage below normal to count as dropped
-        
-        Returns:
-            List of drop durations in days
-        """
-        if drop_threshold_percent is None:
-            drop_threshold_percent = Config.DROP_THRESHOLD_PERCENT
-        
-        if len(timestamps) < 2:
-            return []
-        
-        # Calculate drop threshold (e.g., 25% below normal)
-        drop_threshold = normal_price * (1 - drop_threshold_percent / 100)
-        
-        drop_durations = []
-        in_drop = False
-        drop_start = None
-        
-        for i, (timestamp, price) in enumerate(zip(timestamps, prices)):
-            is_dropped = price < drop_threshold
-            
-            if is_dropped and not in_drop:
-                # Starting a new drop period
-                in_drop = True
-                drop_start = timestamp
-            elif not is_dropped and in_drop:
-                # Ending a drop period
-                in_drop = False
-                if drop_start:
-                    duration = (timestamp - drop_start).total_seconds() / 86400  # days
-                    drop_durations.append(duration)
-                drop_start = None
-        
-        # If still in a drop at the end, count duration to now
-        if in_drop and drop_start:
-            duration = (datetime.now(timezone.utc) - drop_start).total_seconds() / 86400
-            drop_durations.append(duration)
-        
-        return drop_durations
-    
-    @staticmethod
     def analyze_stability(
         product_info: Dict[str, Any],
         lookback_days: int = None,
-        max_avg_drop_duration: int = None,
-        drop_threshold_percent: float = None
+        min_profitable_time_percent: float = None
     ) -> Dict[str, Any]:
         """
-        Analyze price stability for a product.
+        Analyze price stability for a product based on profitability over time.
+        
+        The key question: If I buy at the current price, would I have been able to
+        sell profitably for at least X% of the historical period?
         
         Args:
             product_info: Product information dictionary from Keepa
             lookback_days: Number of days to analyze (default from Config)
-            max_avg_drop_duration: Max average drop duration in days (default from Config)
-            drop_threshold_percent: Minimum % drop from median to be a real deal
+            min_profitable_time_percent: Minimum % of time price must be profitable
         
         Returns:
-            Dictionary containing:
-                - is_stable: Boolean indicating if pricing is stable
-                - normal_price: Detected normal price level (75th percentile)
-                - baseline_price: Historical baseline price (25th percentile)
-                - median_price: Median historical price (50th percentile)
-                - current_price: Most recent price
-                - drop_from_median_percent: How much current price is below median
-                - avg_drop_duration_days: Average duration of drops
-                - num_drops: Number of drop periods
-                - stability_flag: "Stable" or "Flagged - Review"
-                - flag_reasons: List of reasons for flagging
+            Dictionary containing stability metrics and flag
         """
         if lookback_days is None:
             lookback_days = Config.STABILITY_LOOKBACK_DAYS
-        if max_avg_drop_duration is None:
-            max_avg_drop_duration = Config.MAX_AVG_DROP_DURATION_DAYS
-        if drop_threshold_percent is None:
-            drop_threshold_percent = Config.DROP_THRESHOLD_PERCENT
+        if min_profitable_time_percent is None:
+            min_profitable_time_percent = Config.MIN_PROFITABLE_TIME_PERCENT
         
         result = {
             'is_stable': True,
-            'normal_price': None,
-            'baseline_price': None,
-            'median_price': None,
             'current_price': None,
-            'drop_from_median_percent': None,
-            'avg_drop_duration_days': 0,
-            'num_drops': 0,
+            'min_profitable_sell_price': None,
+            'profitable_time_percent': None,
             'stability_flag': 'Stable',
             'flag_reasons': []
         }
@@ -853,92 +790,63 @@ class PriceStabilityAnalyzer:
             logger.info("Insufficient price history for stability analysis - assuming stable")
             return result
         
-        # Calculate TIME-WEIGHTED prices to avoid skew from frequent data points during drops
-        # Weight each price by the duration it was active (until next price change)
-        durations = []
-        for i in range(len(timestamps) - 1):
-            duration = (timestamps[i + 1] - timestamps[i]).total_seconds()
-            durations.append(max(duration, 1))  # Minimum 1 second to avoid zero weights
-        durations.append(1)  # Last price point gets minimal weight
-        
-        total_duration = sum(durations)
-        weights = [d / total_duration for d in durations]
-        
-        # Sort prices with their weights for weighted percentile calculation
-        sorted_indices = np.argsort(prices)
-        sorted_prices = np.array(prices)[sorted_indices]
-        sorted_weights = np.array(weights)[sorted_indices]
-        
-        # Calculate cumulative weights for percentile lookup
-        cumulative_weights = np.cumsum(sorted_weights)
-        
-        # Time-weighted percentile function
-        def weighted_percentile(pct):
-            idx = np.searchsorted(cumulative_weights, pct / 100.0)
-            idx = min(idx, len(sorted_prices) - 1)
-            return float(sorted_prices[idx])
-        
-        normal_price = weighted_percentile(75)
-        result['normal_price'] = round(normal_price, 2)
-        
-        baseline_price = weighted_percentile(25)
-        result['baseline_price'] = round(baseline_price, 2)
-        
-        # Get current price (most recent)
+        # Get current price (most recent) - this is our purchase price
         current_price = prices[-1]
         result['current_price'] = round(current_price, 2)
         
-        # Time-weighted median (where product typically sells, by time spent)
-        median_price = weighted_percentile(50)
-        result['median_price'] = round(median_price, 2)
+        # Calculate minimum sell price needed for profitability
+        # Using the fee structure from ProfitabilityCalculator
+        fees = ProfitabilityCalculator.extract_fees(product_info)
+        fba_fee = fees['fba_pick_and_pack_fee']
+        referral_fee_percent = fees['referral_fee_percent']
+        min_margin = Config.MIN_PROFIT_MARGIN_PERCENT / 100  # Convert to decimal
         
-        # Check if current price is a significant drop from the median (historical norm)
-        # This catches cases where price spiked temporarily and "dropped" back to normal
-        if median_price > 0:
-            drop_from_median_percent = (median_price - current_price) / median_price * 100
-            result['drop_from_median_percent'] = round(drop_from_median_percent, 1)
-            
-            # If current price isn't at least 25% below median, it's not a real deal
-            if drop_from_median_percent < drop_threshold_percent:
-                result['is_stable'] = False
-                result['flag_reasons'].append(
-                    f"Current price ${current_price:.2f} is only {drop_from_median_percent:.1f}% below "
-                    f"median ${median_price:.2f} (need >{drop_threshold_percent}% drop)"
-                )
-                logger.info(
-                    f"Price stability: FLAGGED - Current ${current_price:.2f} is only "
-                    f"{drop_from_median_percent:.1f}% below median ${median_price:.2f} "
-                    f"(need >{drop_threshold_percent}% drop)"
-                )
-        
-        # Calculate drop durations
-        drop_durations = PriceStabilityAnalyzer.calculate_drop_durations(
-            timestamps, prices, normal_price, drop_threshold_percent
-        )
-        
-        result['num_drops'] = len(drop_durations)
-        
-        if drop_durations:
-            avg_drop_duration = sum(drop_durations) / len(drop_durations)
-            result['avg_drop_duration_days'] = round(avg_drop_duration, 1)
-            
-            # Flag as unstable if average drop duration exceeds threshold
-            if avg_drop_duration > max_avg_drop_duration:
-                result['is_stable'] = False
-                result['flag_reasons'].append(
-                    f"Avg drop duration {avg_drop_duration:.1f} days > {max_avg_drop_duration} day threshold"
-                )
-                logger.info(
-                    f"Price stability: FLAGGED - Avg drop duration {avg_drop_duration:.1f} days "
-                    f"> {max_avg_drop_duration} day threshold ({len(drop_durations)} drops)"
-                )
-            else:
-                logger.info(
-                    f"Price stability: Drop duration OK - Avg {avg_drop_duration:.1f} days "
-                    f"<= {max_avg_drop_duration} day threshold ({len(drop_durations)} drops)"
-                )
+        # Calculate minimum sell price for target margin
+        # Formula: profit = sell_price - (sell_price * ref_fee%) - fba_fee - purchase_price
+        # For margin: profit / sell_price >= min_margin
+        # Solving: sell_price >= (fba_fee + purchase_price) / (1 - ref_fee% - min_margin)
+        denominator = 1 - (referral_fee_percent / 100) - min_margin
+        if denominator > 0:
+            min_profitable_sell_price = (fba_fee + current_price) / denominator
         else:
-            logger.info("Price stability: No significant drops detected")
+            min_profitable_sell_price = current_price * 2  # Fallback if fees are too high
+        
+        result['min_profitable_sell_price'] = round(min_profitable_sell_price, 2)
+        
+        # Calculate TIME-WEIGHTED percentage of time price was at or above min profitable price
+        durations = []
+        for i in range(len(timestamps) - 1):
+            duration = (timestamps[i + 1] - timestamps[i]).total_seconds()
+            durations.append(max(duration, 1))
+        durations.append(1)
+        
+        total_duration = sum(durations)
+        
+        # Calculate time spent at or above minimum profitable sell price
+        profitable_duration = 0
+        for i, price in enumerate(prices):
+            if price >= min_profitable_sell_price:
+                profitable_duration += durations[i]
+        
+        profitable_time_percent = (profitable_duration / total_duration) * 100
+        result['profitable_time_percent'] = round(profitable_time_percent, 1)
+        
+        # Check if price was profitable for enough of the time
+        if profitable_time_percent < min_profitable_time_percent:
+            result['is_stable'] = False
+            result['flag_reasons'].append(
+                f"Price was profitable only {profitable_time_percent:.1f}% of time "
+                f"(need >={min_profitable_time_percent}% at or above ${min_profitable_sell_price:.2f})"
+            )
+            logger.info(
+                f"Price stability: FLAGGED - Profitable only {profitable_time_percent:.1f}% of time "
+                f"(need >={min_profitable_time_percent}% at ${min_profitable_sell_price:.2f}+)"
+            )
+        else:
+            logger.info(
+                f"Price stability: OK - Profitable {profitable_time_percent:.1f}% of time "
+                f"(>={min_profitable_time_percent}% at ${min_profitable_sell_price:.2f}+)"
+            )
         
         # Set final flag
         if not result['is_stable']:
@@ -988,11 +896,11 @@ def main() -> None:
         new_asins = all_current_asins - prior_asins
         logger.info(f"Found {len(new_asins)} new ASINs out of {len(all_current_asins)} total")
         
-        # Process new ASINs - only add those meeting 10% margin threshold
+        # Process new ASINs - only add those meeting margin AND stability thresholds
         added_count = 0
         profitable_count = 0
         skipped_count = 0
-        flagged_count = 0
+        skipped_unstable_count = 0
         for asin in new_asins:
             product_info = keepa_manager.get_product_info(asin)
             if product_info:
@@ -1005,17 +913,23 @@ def main() -> None:
                 if profitability['meets_margin_threshold']:
                     profitable_count += 1
                     
-                    # Analyze price stability
+                    # Analyze price stability - skip if not profitable enough historically
                     stability = PriceStabilityAnalyzer.analyze_stability(product_info)
                     
                     if not stability['is_stable']:
-                        flagged_count += 1
+                        skipped_unstable_count += 1
+                        pct = stability.get('profitable_time_percent', 0)
+                        logger.info(
+                            f"✗ Skipping {asin}: Only profitable {pct:.1f}% of time "
+                            f"(need >={Config.MIN_PROFITABLE_TIME_PERCENT}%)"
+                        )
+                        continue
                     
                     logger.info(
                         f"✓ ADDING TO AIRTABLE: {asin} - "
                         f"Profit: ${profitability['estimated_profit']:.2f} "
                         f"({profitability['profit_margin_percent']:.1f}% margin) - "
-                        f"Stability: {stability['stability_flag']}"
+                        f"Profitable {stability['profitable_time_percent']:.1f}% of time"
                     )
                     
                     time.sleep(Config.PRODUCT_PROCESSING_DELAY)
@@ -1042,8 +956,8 @@ def main() -> None:
         logger.info(f"  - New ASINs found: {len(new_asins)}")
         logger.info(f"  - Profitable deals (≥10% margin): {profitable_count}")
         logger.info(f"  - Added to Airtable: {added_count}")
-        logger.info(f"  - Flagged for review (unstable pricing): {flagged_count}")
         logger.info(f"  - Skipped (below 10% margin): {skipped_count}")
+        logger.info(f"  - Skipped (not profitable ≥{Config.MIN_PROFITABLE_TIME_PERCENT}% of time): {skipped_unstable_count}")
         logger.info(f"  - ASINs removed from tracking: {removed_count}")
         logger.info(f"  - Total ASINs tracked: {len(all_current_asins)}")
         logger.info("=" * 60)
@@ -1143,25 +1057,23 @@ def test_asin(asin: str) -> None:
         stability = PriceStabilityAnalyzer.analyze_stability(product_info)
         
         print(f"  Lookback Period: {Config.STABILITY_LOOKBACK_DAYS} days")
-        print(f"  Required Drop from Median: {Config.DROP_THRESHOLD_PERCENT}%")
-        print(f"  Max Avg Drop Duration: {Config.MAX_AVG_DROP_DURATION_DAYS} days")
-        
-        if stability.get('median_price'):
-            print(f"\n  Median Price (historical norm): ${stability['median_price']:.2f}")
+        print(f"  Required Profitable Time: {Config.MIN_PROFITABLE_TIME_PERCENT}%")
         
         if stability.get('current_price'):
-            print(f"  Current Price: ${stability['current_price']:.2f}")
+            print(f"\n  Current Price (buy at): ${stability['current_price']:.2f}")
         
-        if stability.get('drop_from_median_percent') is not None:
-            drop_pct = stability['drop_from_median_percent']
-            print(f"  Drop from Median: {drop_pct:.1f}%", end="")
-            if drop_pct < Config.DROP_THRESHOLD_PERCENT:
-                print(f" ⚠️  (need >{Config.DROP_THRESHOLD_PERCENT}% - not a real drop)")
+        if stability.get('min_profitable_sell_price'):
+            print(f"  Min Profitable Sell Price: ${stability['min_profitable_sell_price']:.2f}")
+            print(f"    (for {Config.MIN_PROFIT_MARGIN_PERCENT}% margin after fees)")
+        
+        if stability.get('profitable_time_percent') is not None:
+            pct = stability['profitable_time_percent']
+            threshold = Config.MIN_PROFITABLE_TIME_PERCENT
+            print(f"\n  Time at Profitable Price: {pct:.1f}%", end="")
+            if pct >= threshold:
+                print(f" ✓ (above {threshold}% threshold)")
             else:
-                print(f" ✓ (above {Config.DROP_THRESHOLD_PERCENT}% threshold)")
-        
-        print(f"\n  Number of Drops: {stability['num_drops']}")
-        print(f"  Avg Drop Duration: {stability['avg_drop_duration_days']} days")
+                print(f" ⚠️  (need >={threshold}%)")
         
         if stability['is_stable']:
             print(f"\n  ✅ Price Stability: STABLE")
@@ -1173,11 +1085,17 @@ def test_asin(asin: str) -> None:
         # Final verdict
         print("\n" + "=" * 50)
         min_margin = Config.MIN_PROFIT_MARGIN_PERCENT
+        min_time = Config.MIN_PROFITABLE_TIME_PERCENT
         
-        if profitability.get('meets_margin_threshold'):
+        if profitability.get('meets_margin_threshold') and stability.get('is_stable'):
             print(f"  ✅ RESULT: WOULD BE ADDED TO AIRTABLE")
             print(f"     Margin {profitability['profit_margin_percent']:.2f}% >= {min_margin}% threshold")
-            print(f"     Stability Flag: {stability['stability_flag']}")
+            print(f"     Profitable {stability['profitable_time_percent']:.1f}% of time >= {min_time}%")
+        elif profitability.get('meets_margin_threshold') and not stability.get('is_stable'):
+            pct = stability.get('profitable_time_percent', 0)
+            print(f"  ❌ RESULT: WOULD NOT BE ADDED")
+            print(f"     Margin {profitability['profit_margin_percent']:.2f}% >= {min_margin}% ✓")
+            print(f"     But only profitable {pct:.1f}% of time (need >={min_time}%)")
         else:
             margin = profitability.get('profit_margin_percent')
             if margin is not None:

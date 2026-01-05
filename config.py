@@ -49,8 +49,7 @@ class Config:
     
     # Price Stability Thresholds
     STABILITY_LOOKBACK_DAYS: int = int(os.getenv('STABILITY_LOOKBACK_DAYS', '270'))
-    MAX_AVG_DROP_DURATION_DAYS: int = int(os.getenv('MAX_AVG_DROP_DURATION_DAYS', '14'))
-    DROP_THRESHOLD_PERCENT: float = float(os.getenv('DROP_THRESHOLD_PERCENT', '25.0'))
+    MIN_PROFITABLE_TIME_PERCENT: float = float(os.getenv('MIN_PROFITABLE_TIME_PERCENT', '75.0'))
     
     @classmethod
     def validate(cls) -> None:
