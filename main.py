@@ -8,9 +8,11 @@ import argparse
 import json
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from itertools import cycle
-from typing import Dict, List, Optional, Set, Any
+from typing import Dict, List, Optional, Set, Any, Tuple
+
+import numpy as np
 
 import keepa
 import requests
@@ -262,7 +264,8 @@ class AirtableManager:
         self, 
         asin: str, 
         product_info: Dict[str, Any],
-        profitability: Optional[Dict[str, Any]] = None
+        profitability: Optional[Dict[str, Any]] = None,
+        stability: Optional[Dict[str, Any]] = None
     ) -> bool:
         """
         Add a product record to Airtable.
@@ -271,6 +274,7 @@ class AirtableManager:
             asin: Amazon ASIN
             product_info: Product information dictionary from Keepa
             profitability: Optional profitability metrics dictionary
+            stability: Optional price stability metrics dictionary
         
         Returns:
             True if record added successfully, False otherwise
@@ -295,6 +299,11 @@ class AirtableManager:
             
             current_date_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M")
             
+            # Get stability flag (default to "Stable" if not provided)
+            stability_flag = "Stable"
+            if stability and 'stability_flag' in stability:
+                stability_flag = stability['stability_flag']
+            
             # Build the fields dictionary
             fields = {
                 "ASIN": asin,
@@ -304,7 +313,8 @@ class AirtableManager:
                 "Category": product_category,
                 "Date Added": current_date_time,
                 "BILM": bilm,
-                "Seller": who_is_seller
+                "Seller": who_is_seller,
+                "Price Stability": stability_flag
             }
             
             payload = {
@@ -634,6 +644,217 @@ class ProfitabilityCalculator:
         return result
 
 
+class PriceStabilityAnalyzer:
+    """Analyzes price history to detect volatile/unstable pricing patterns."""
+    
+    # Keepa epoch: January 1, 2011
+    KEEPA_EPOCH = datetime(2011, 1, 1, tzinfo=timezone.utc)
+    
+    @staticmethod
+    def keepa_minutes_to_datetime(keepa_minutes: int) -> datetime:
+        """Convert Keepa timestamp (minutes since 2011-01-01) to datetime."""
+        return PriceStabilityAnalyzer.KEEPA_EPOCH + timedelta(minutes=int(keepa_minutes))
+    
+    @staticmethod
+    def extract_price_history(
+        product_info: Dict[str, Any],
+        lookback_days: int = None
+    ) -> Tuple[List[datetime], List[float]]:
+        """
+        Extract price history with timestamps from product data.
+        
+        Args:
+            product_info: Product information dictionary from Keepa
+            lookback_days: Number of days to look back (default from Config)
+        
+        Returns:
+            Tuple of (timestamps, prices) lists filtered to lookback period
+        """
+        if lookback_days is None:
+            lookback_days = Config.STABILITY_LOOKBACK_DAYS
+        
+        data = product_info.get('data', {})
+        
+        # Get BUY_BOX_SHIPPING history (includes timestamps)
+        # Keepa returns interleaved [time, price, time, price, ...]
+        buy_box_raw = data.get('BUY_BOX_SHIPPING')
+        
+        if buy_box_raw is None or not hasattr(buy_box_raw, '__len__') or len(buy_box_raw) < 2:
+            return [], []
+        
+        # Convert to numpy array for easier manipulation
+        raw_array = np.array(buy_box_raw)
+        
+        # Extract timestamps (even indices) and prices (odd indices)
+        timestamps_raw = raw_array[0::2]
+        prices_raw = raw_array[1::2]
+        
+        # Filter out invalid entries (negative prices mean no data)
+        valid_mask = prices_raw > 0
+        timestamps_raw = timestamps_raw[valid_mask]
+        prices_raw = prices_raw[valid_mask]
+        
+        if len(timestamps_raw) == 0:
+            return [], []
+        
+        # Convert Keepa timestamps to datetime
+        timestamps = [
+            PriceStabilityAnalyzer.keepa_minutes_to_datetime(t) 
+            for t in timestamps_raw
+        ]
+        
+        # Prices are in cents, convert to dollars
+        prices = (prices_raw / 100).tolist()
+        
+        # Filter to lookback period
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+        filtered_data = [
+            (t, p) for t, p in zip(timestamps, prices) 
+            if t >= cutoff_date
+        ]
+        
+        if not filtered_data:
+            return [], []
+        
+        filtered_timestamps, filtered_prices = zip(*filtered_data)
+        return list(filtered_timestamps), list(filtered_prices)
+    
+    @staticmethod
+    def calculate_drop_durations(
+        timestamps: List[datetime],
+        prices: List[float],
+        normal_price: float,
+        drop_threshold_percent: float = None
+    ) -> List[float]:
+        """
+        Calculate the duration of each drop period.
+        
+        Args:
+            timestamps: List of datetime timestamps
+            prices: List of prices corresponding to timestamps
+            normal_price: The "normal" price level
+            drop_threshold_percent: Percentage below normal to count as dropped
+        
+        Returns:
+            List of drop durations in days
+        """
+        if drop_threshold_percent is None:
+            drop_threshold_percent = Config.DROP_THRESHOLD_PERCENT
+        
+        if len(timestamps) < 2:
+            return []
+        
+        # Calculate drop threshold (e.g., 25% below normal)
+        drop_threshold = normal_price * (1 - drop_threshold_percent / 100)
+        
+        drop_durations = []
+        in_drop = False
+        drop_start = None
+        
+        for i, (timestamp, price) in enumerate(zip(timestamps, prices)):
+            is_dropped = price < drop_threshold
+            
+            if is_dropped and not in_drop:
+                # Starting a new drop period
+                in_drop = True
+                drop_start = timestamp
+            elif not is_dropped and in_drop:
+                # Ending a drop period
+                in_drop = False
+                if drop_start:
+                    duration = (timestamp - drop_start).total_seconds() / 86400  # days
+                    drop_durations.append(duration)
+                drop_start = None
+        
+        # If still in a drop at the end, count duration to now
+        if in_drop and drop_start:
+            duration = (datetime.now(timezone.utc) - drop_start).total_seconds() / 86400
+            drop_durations.append(duration)
+        
+        return drop_durations
+    
+    @staticmethod
+    def analyze_stability(
+        product_info: Dict[str, Any],
+        lookback_days: int = None,
+        max_avg_drop_duration: int = None,
+        drop_threshold_percent: float = None
+    ) -> Dict[str, Any]:
+        """
+        Analyze price stability for a product.
+        
+        Args:
+            product_info: Product information dictionary from Keepa
+            lookback_days: Number of days to analyze (default from Config)
+            max_avg_drop_duration: Max average drop duration in days (default from Config)
+            drop_threshold_percent: Percentage below normal to count as dropped
+        
+        Returns:
+            Dictionary containing:
+                - is_stable: Boolean indicating if pricing is stable
+                - normal_price: Detected normal price level
+                - avg_drop_duration_days: Average duration of drops
+                - num_drops: Number of drop periods
+                - stability_flag: "Stable" or "Flagged - Review"
+        """
+        if lookback_days is None:
+            lookback_days = Config.STABILITY_LOOKBACK_DAYS
+        if max_avg_drop_duration is None:
+            max_avg_drop_duration = Config.MAX_AVG_DROP_DURATION_DAYS
+        if drop_threshold_percent is None:
+            drop_threshold_percent = Config.DROP_THRESHOLD_PERCENT
+        
+        result = {
+            'is_stable': True,
+            'normal_price': None,
+            'avg_drop_duration_days': 0,
+            'num_drops': 0,
+            'stability_flag': 'Stable'
+        }
+        
+        # Extract price history
+        timestamps, prices = PriceStabilityAnalyzer.extract_price_history(
+            product_info, lookback_days
+        )
+        
+        if len(prices) < 2:
+            logger.info("Insufficient price history for stability analysis - assuming stable")
+            return result
+        
+        # Calculate normal price as 75th percentile (upper range)
+        normal_price = float(np.percentile(prices, 75))
+        result['normal_price'] = round(normal_price, 2)
+        
+        # Calculate drop durations
+        drop_durations = PriceStabilityAnalyzer.calculate_drop_durations(
+            timestamps, prices, normal_price, drop_threshold_percent
+        )
+        
+        result['num_drops'] = len(drop_durations)
+        
+        if drop_durations:
+            avg_drop_duration = sum(drop_durations) / len(drop_durations)
+            result['avg_drop_duration_days'] = round(avg_drop_duration, 1)
+            
+            # Flag as unstable if average drop duration exceeds threshold
+            if avg_drop_duration > max_avg_drop_duration:
+                result['is_stable'] = False
+                result['stability_flag'] = 'Flagged - Review'
+                logger.info(
+                    f"Price stability: UNSTABLE - Avg drop duration {avg_drop_duration:.1f} days "
+                    f"> {max_avg_drop_duration} day threshold ({len(drop_durations)} drops)"
+                )
+            else:
+                logger.info(
+                    f"Price stability: STABLE - Avg drop duration {avg_drop_duration:.1f} days "
+                    f"<= {max_avg_drop_duration} day threshold ({len(drop_durations)} drops)"
+                )
+        else:
+            logger.info("Price stability: STABLE - No significant drops detected")
+        
+        return result
+
+
 def main() -> None:
     """Main application entry point."""
     try:
@@ -677,6 +898,7 @@ def main() -> None:
         added_count = 0
         profitable_count = 0
         skipped_count = 0
+        flagged_count = 0
         for asin in new_asins:
             product_info = keepa_manager.get_product_info(asin)
             if product_info:
@@ -688,15 +910,23 @@ def main() -> None:
                 # Only add to Airtable if meets 10% margin threshold
                 if profitability['meets_margin_threshold']:
                     profitable_count += 1
+                    
+                    # Analyze price stability
+                    stability = PriceStabilityAnalyzer.analyze_stability(product_info)
+                    
+                    if not stability['is_stable']:
+                        flagged_count += 1
+                    
                     logger.info(
                         f"✓ ADDING TO AIRTABLE: {asin} - "
                         f"Profit: ${profitability['estimated_profit']:.2f} "
-                        f"({profitability['profit_margin_percent']:.1f}% margin)"
+                        f"({profitability['profit_margin_percent']:.1f}% margin) - "
+                        f"Stability: {stability['stability_flag']}"
                     )
                     
                     time.sleep(Config.PRODUCT_PROCESSING_DELAY)
                     
-                    if airtable_manager.add_record(asin, product_info, profitability):
+                    if airtable_manager.add_record(asin, product_info, profitability, stability):
                         added_count += 1
                 else:
                     skipped_count += 1
@@ -718,6 +948,7 @@ def main() -> None:
         logger.info(f"  - New ASINs found: {len(new_asins)}")
         logger.info(f"  - Profitable deals (≥10% margin): {profitable_count}")
         logger.info(f"  - Added to Airtable: {added_count}")
+        logger.info(f"  - Flagged for review (unstable pricing): {flagged_count}")
         logger.info(f"  - Skipped (below 10% margin): {skipped_count}")
         logger.info(f"  - ASINs removed from tracking: {removed_count}")
         logger.info(f"  - Total ASINs tracked: {len(all_current_asins)}")
@@ -809,6 +1040,29 @@ def test_asin(asin: str) -> None:
         if profitability.get('profit_margin_percent') is not None:
             print(f"  Profit Margin: {profitability['profit_margin_percent']:.2f}%")
         
+        # Analyze price stability
+        print("\n📈 PRICE STABILITY ANALYSIS:")
+        print("-" * 50)
+        stability = PriceStabilityAnalyzer.analyze_stability(product_info)
+        
+        print(f"  Lookback Period: {Config.STABILITY_LOOKBACK_DAYS} days")
+        print(f"  Drop Threshold: {Config.DROP_THRESHOLD_PERCENT}% below normal")
+        print(f"  Max Avg Drop Duration: {Config.MAX_AVG_DROP_DURATION_DAYS} days")
+        
+        if stability.get('normal_price'):
+            print(f"\n  Normal Price (75th %ile): ${stability['normal_price']:.2f}")
+            drop_level = stability['normal_price'] * (1 - Config.DROP_THRESHOLD_PERCENT / 100)
+            print(f"  Drop Level (25% below): ${drop_level:.2f}")
+        
+        print(f"\n  Number of Drops: {stability['num_drops']}")
+        print(f"  Avg Drop Duration: {stability['avg_drop_duration_days']} days")
+        
+        if stability['is_stable']:
+            print(f"\n  ✅ Price Stability: STABLE")
+        else:
+            print(f"\n  ⚠️  Price Stability: FLAGGED FOR REVIEW")
+            print(f"     (Avg drop duration exceeds {Config.MAX_AVG_DROP_DURATION_DAYS} day threshold)")
+        
         # Final verdict
         print("\n" + "=" * 50)
         min_margin = Config.MIN_PROFIT_MARGIN_PERCENT
@@ -816,6 +1070,7 @@ def test_asin(asin: str) -> None:
         if profitability.get('meets_margin_threshold'):
             print(f"  ✅ RESULT: WOULD BE ADDED TO AIRTABLE")
             print(f"     Margin {profitability['profit_margin_percent']:.2f}% >= {min_margin}% threshold")
+            print(f"     Stability Flag: {stability['stability_flag']}")
         else:
             margin = profitability.get('profit_margin_percent')
             if margin is not None:
