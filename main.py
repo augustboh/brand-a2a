@@ -205,8 +205,13 @@ class KeepaAPIManager:
                     return None
                 
                 self.api.wait_for_tokens()
-                # Request with offers=20 to get FBA fees data and history for price before drop
-                product_data = self.api.query(asin, history=True, offers=20)
+                # Request history for stability analysis (1 token vs 12+ with offers)
+                # FBA pick&pack fee is still available, referral fee defaults to 15%
+                product_data = self.api.query(
+                    asin, 
+                    history=True, 
+                    days=Config.STABILITY_LOOKBACK_DAYS  # Limit history to what we need
+                )
                 
                 if product_data and len(product_data) > 0:
                     return product_data[0]
