@@ -793,6 +793,8 @@ class PriceStabilityAnalyzer:
         
         if len(prices) < 2:
             logger.info("Insufficient price history for stability analysis - assuming stable")
+            # Set default values since we're assuming stable
+            result['profitable_time_percent'] = 100.0
             return result
         
         # Get current price (most recent) - this is our purchase price
