@@ -48,7 +48,7 @@ class Config:
     MIN_PROFIT_MARGIN_PERCENT: float = float(os.getenv('MIN_PROFIT_MARGIN_PERCENT', '10.0'))
     
     # Price Stability Thresholds
-    STABILITY_LOOKBACK_DAYS: int = int(os.getenv('STABILITY_LOOKBACK_DAYS', '90'))
+    STABILITY_LOOKBACK_DAYS: int = int(os.getenv('STABILITY_LOOKBACK_DAYS', '180'))
     MAX_AVG_DROP_DURATION_DAYS: int = int(os.getenv('MAX_AVG_DROP_DURATION_DAYS', '14'))
     DROP_THRESHOLD_PERCENT: float = float(os.getenv('DROP_THRESHOLD_PERCENT', '25.0'))
     
