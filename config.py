@@ -44,6 +44,9 @@ class Config:
     API_REQUEST_DELAY: float = float(os.getenv('API_REQUEST_DELAY', '2.0'))
     PRODUCT_PROCESSING_DELAY: float = float(os.getenv('PRODUCT_PROCESSING_DELAY', '5.0'))
     
+    # Profitability Thresholds
+    MIN_PROFIT_MARGIN_PERCENT: float = float(os.getenv('MIN_PROFIT_MARGIN_PERCENT', '10.0'))
+    
     @classmethod
     def validate(cls) -> None:
         """Validate that all required configuration is present."""
