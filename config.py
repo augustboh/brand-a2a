@@ -32,7 +32,7 @@ class Config:
     
     # API Configuration
     KEEPA_DOMAIN: int = int(os.getenv('KEEPA_DOMAIN', '1'))
-    MIN_TOKENS_REQUIRED: int = int(os.getenv('MIN_TOKENS_REQUIRED', '20'))
+    MIN_TOKENS_REQUIRED: int = int(os.getenv('MIN_TOKENS_REQUIRED', '5'))
     MIN_TOKENS_FOR_QUERY: int = int(os.getenv('MIN_TOKENS_FOR_QUERY', '2'))
     TOKEN_WAIT_TIMEOUT: int = int(os.getenv('TOKEN_WAIT_TIMEOUT', '30'))
     
