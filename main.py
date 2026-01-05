@@ -307,25 +307,6 @@ class AirtableManager:
                 "Seller": who_is_seller
             }
             
-            # Add profitability fields if available
-            if profitability:
-                if profitability.get('current_price') is not None:
-                    fields["Current Price"] = profitability['current_price']
-                if profitability.get('previous_price') is not None:
-                    fields["Previous Price"] = profitability['previous_price']
-                if profitability.get('fba_pick_and_pack_fee') is not None:
-                    fields["FBA Pick Pack Fee"] = profitability['fba_pick_and_pack_fee']
-                if profitability.get('referral_fee_percent') is not None:
-                    fields["Referral Fee Percent"] = profitability['referral_fee_percent']
-                if profitability.get('referral_fee_amount') is not None:
-                    fields["Referral Fee Amount"] = profitability['referral_fee_amount']
-                if profitability.get('net_revenue') is not None:
-                    fields["Net Revenue"] = profitability['net_revenue']
-                if profitability.get('estimated_profit') is not None:
-                    fields["Estimated Profit"] = profitability['estimated_profit']
-                if profitability.get('profit_margin_percent') is not None:
-                    fields["Profit Margin Percent"] = profitability['profit_margin_percent']
-            
             payload = {
                 "records": [{
                     "fields": fields
