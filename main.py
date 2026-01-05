@@ -963,10 +963,12 @@ def main() -> None:
         )
         file_manager = FileManager()
         
-        # Initialize API
+        # Initialize API (wait for tokens if needed)
         if not keepa_manager.initialize_api():
-            logger.error("Failed to initialize Keepa API. Exiting.")
-            return
+            logger.info("Waiting for API tokens to regenerate...")
+            if not keepa_manager.wait_for_tokens_with_timeout(timeout=600):
+                logger.error("Failed to initialize Keepa API after waiting. Exiting.")
+                return
         
         # Load prior ASINs
         prior_asins = file_manager.read_file_to_set(Config.PRIOR_ASINS_FILE)
