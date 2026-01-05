@@ -853,20 +853,43 @@ class PriceStabilityAnalyzer:
             logger.info("Insufficient price history for stability analysis - assuming stable")
             return result
         
-        # Calculate normal price as 75th percentile (upper range)
-        normal_price = float(np.percentile(prices, 75))
+        # Calculate TIME-WEIGHTED prices to avoid skew from frequent data points during drops
+        # Weight each price by the duration it was active (until next price change)
+        durations = []
+        for i in range(len(timestamps) - 1):
+            duration = (timestamps[i + 1] - timestamps[i]).total_seconds()
+            durations.append(max(duration, 1))  # Minimum 1 second to avoid zero weights
+        durations.append(1)  # Last price point gets minimal weight
+        
+        total_duration = sum(durations)
+        weights = [d / total_duration for d in durations]
+        
+        # Sort prices with their weights for weighted percentile calculation
+        sorted_indices = np.argsort(prices)
+        sorted_prices = np.array(prices)[sorted_indices]
+        sorted_weights = np.array(weights)[sorted_indices]
+        
+        # Calculate cumulative weights for percentile lookup
+        cumulative_weights = np.cumsum(sorted_weights)
+        
+        # Time-weighted percentile function
+        def weighted_percentile(pct):
+            idx = np.searchsorted(cumulative_weights, pct / 100.0)
+            idx = min(idx, len(sorted_prices) - 1)
+            return float(sorted_prices[idx])
+        
+        normal_price = weighted_percentile(75)
         result['normal_price'] = round(normal_price, 2)
         
-        # Calculate baseline price as 25th percentile (where price usually sits)
-        baseline_price = float(np.percentile(prices, 25))
+        baseline_price = weighted_percentile(25)
         result['baseline_price'] = round(baseline_price, 2)
         
         # Get current price (most recent)
         current_price = prices[-1]
         result['current_price'] = round(current_price, 2)
         
-        # Calculate median price (where product typically sells)
-        median_price = float(np.percentile(prices, 50))
+        # Time-weighted median (where product typically sells, by time spent)
+        median_price = weighted_percentile(50)
         result['median_price'] = round(median_price, 2)
         
         # Check if current price is a significant drop from the median (historical norm)
