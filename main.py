@@ -675,36 +675,58 @@ class PriceStabilityAnalyzer:
         
         data = product_info.get('data', {})
         
-        # Get BUY_BOX_SHIPPING history (includes timestamps)
-        # Keepa returns interleaved [time, price, time, price, ...]
-        buy_box_raw = data.get('BUY_BOX_SHIPPING')
+        # Try BUY_BOX_SHIPPING first, then fall back to NEW
+        # Keepa library provides separate arrays for prices and timestamps
+        prices_raw = data.get('BUY_BOX_SHIPPING')
+        timestamps_raw = data.get('BUY_BOX_SHIPPING_time')
         
-        if buy_box_raw is None or not hasattr(buy_box_raw, '__len__') or len(buy_box_raw) < 2:
+        if prices_raw is None or not hasattr(prices_raw, '__len__') or len(prices_raw) < 2:
+            # Fall back to NEW price history
+            prices_raw = data.get('NEW')
+            timestamps_raw = data.get('NEW_time')
+        
+        if prices_raw is None or timestamps_raw is None:
             return [], []
         
-        # Convert to numpy array for easier manipulation
-        raw_array = np.array(buy_box_raw)
-        
-        # Extract timestamps (even indices) and prices (odd indices)
-        timestamps_raw = raw_array[0::2]
-        prices_raw = raw_array[1::2]
-        
-        # Filter out invalid entries (negative prices mean no data)
-        valid_mask = prices_raw > 0
-        timestamps_raw = timestamps_raw[valid_mask]
-        prices_raw = prices_raw[valid_mask]
-        
-        if len(timestamps_raw) == 0:
+        if not hasattr(prices_raw, '__len__') or len(prices_raw) < 2:
             return [], []
         
-        # Convert Keepa timestamps to datetime
-        timestamps = [
-            PriceStabilityAnalyzer.keepa_minutes_to_datetime(t) 
-            for t in timestamps_raw
-        ]
+        # Convert to numpy arrays
+        prices_arr = np.array(prices_raw)
+        timestamps_arr = np.array(timestamps_raw)
         
-        # Prices are in cents, convert to dollars
-        prices = (prices_raw / 100).tolist()
+        # Ensure both arrays have the same length
+        min_len = min(len(prices_arr), len(timestamps_arr))
+        prices_arr = prices_arr[:min_len]
+        timestamps_arr = timestamps_arr[:min_len]
+        
+        # Filter out invalid entries (negative prices mean no data, NaN values)
+        valid_mask = (prices_arr > 0) & ~np.isnan(prices_arr)
+        prices_arr = prices_arr[valid_mask]
+        timestamps_arr = timestamps_arr[valid_mask]
+        
+        if len(prices_arr) == 0:
+            return [], []
+        
+        # Convert timestamps - keepa library returns datetime objects directly
+        # but they might be numpy datetime64 or naive datetime, so normalize all to UTC
+        timestamps = []
+        for t in timestamps_arr:
+            if isinstance(t, datetime):
+                # Already a datetime object - ensure it has timezone
+                if t.tzinfo is None:
+                    t = t.replace(tzinfo=timezone.utc)
+                timestamps.append(t)
+            elif isinstance(t, np.datetime64):
+                # Convert numpy datetime64 to Python datetime
+                ts = (t - np.datetime64('1970-01-01T00:00:00')) / np.timedelta64(1, 's')
+                timestamps.append(datetime.fromtimestamp(ts, tz=timezone.utc))
+            else:
+                # Assume Keepa minutes format
+                timestamps.append(PriceStabilityAnalyzer.keepa_minutes_to_datetime(int(t)))
+        
+        # Prices are already in dollars from keepa library
+        prices = prices_arr.tolist()
         
         # Filter to lookback period
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=lookback_days)
@@ -787,15 +809,20 @@ class PriceStabilityAnalyzer:
             product_info: Product information dictionary from Keepa
             lookback_days: Number of days to analyze (default from Config)
             max_avg_drop_duration: Max average drop duration in days (default from Config)
-            drop_threshold_percent: Percentage below normal to count as dropped
+            drop_threshold_percent: Minimum % drop from median to be a real deal
         
         Returns:
             Dictionary containing:
                 - is_stable: Boolean indicating if pricing is stable
-                - normal_price: Detected normal price level
+                - normal_price: Detected normal price level (75th percentile)
+                - baseline_price: Historical baseline price (25th percentile)
+                - median_price: Median historical price (50th percentile)
+                - current_price: Most recent price
+                - drop_from_median_percent: How much current price is below median
                 - avg_drop_duration_days: Average duration of drops
                 - num_drops: Number of drop periods
                 - stability_flag: "Stable" or "Flagged - Review"
+                - flag_reasons: List of reasons for flagging
         """
         if lookback_days is None:
             lookback_days = Config.STABILITY_LOOKBACK_DAYS
@@ -807,9 +834,14 @@ class PriceStabilityAnalyzer:
         result = {
             'is_stable': True,
             'normal_price': None,
+            'baseline_price': None,
+            'median_price': None,
+            'current_price': None,
+            'drop_from_median_percent': None,
             'avg_drop_duration_days': 0,
             'num_drops': 0,
-            'stability_flag': 'Stable'
+            'stability_flag': 'Stable',
+            'flag_reasons': []
         }
         
         # Extract price history
@@ -825,6 +857,37 @@ class PriceStabilityAnalyzer:
         normal_price = float(np.percentile(prices, 75))
         result['normal_price'] = round(normal_price, 2)
         
+        # Calculate baseline price as 25th percentile (where price usually sits)
+        baseline_price = float(np.percentile(prices, 25))
+        result['baseline_price'] = round(baseline_price, 2)
+        
+        # Get current price (most recent)
+        current_price = prices[-1]
+        result['current_price'] = round(current_price, 2)
+        
+        # Calculate median price (where product typically sells)
+        median_price = float(np.percentile(prices, 50))
+        result['median_price'] = round(median_price, 2)
+        
+        # Check if current price is a significant drop from the median (historical norm)
+        # This catches cases where price spiked temporarily and "dropped" back to normal
+        if median_price > 0:
+            drop_from_median_percent = (median_price - current_price) / median_price * 100
+            result['drop_from_median_percent'] = round(drop_from_median_percent, 1)
+            
+            # If current price isn't at least 25% below median, it's not a real deal
+            if drop_from_median_percent < drop_threshold_percent:
+                result['is_stable'] = False
+                result['flag_reasons'].append(
+                    f"Current price ${current_price:.2f} is only {drop_from_median_percent:.1f}% below "
+                    f"median ${median_price:.2f} (need >{drop_threshold_percent}% drop)"
+                )
+                logger.info(
+                    f"Price stability: FLAGGED - Current ${current_price:.2f} is only "
+                    f"{drop_from_median_percent:.1f}% below median ${median_price:.2f} "
+                    f"(need >{drop_threshold_percent}% drop)"
+                )
+        
         # Calculate drop durations
         drop_durations = PriceStabilityAnalyzer.calculate_drop_durations(
             timestamps, prices, normal_price, drop_threshold_percent
@@ -839,18 +902,24 @@ class PriceStabilityAnalyzer:
             # Flag as unstable if average drop duration exceeds threshold
             if avg_drop_duration > max_avg_drop_duration:
                 result['is_stable'] = False
-                result['stability_flag'] = 'Flagged - Review'
+                result['flag_reasons'].append(
+                    f"Avg drop duration {avg_drop_duration:.1f} days > {max_avg_drop_duration} day threshold"
+                )
                 logger.info(
-                    f"Price stability: UNSTABLE - Avg drop duration {avg_drop_duration:.1f} days "
+                    f"Price stability: FLAGGED - Avg drop duration {avg_drop_duration:.1f} days "
                     f"> {max_avg_drop_duration} day threshold ({len(drop_durations)} drops)"
                 )
             else:
                 logger.info(
-                    f"Price stability: STABLE - Avg drop duration {avg_drop_duration:.1f} days "
+                    f"Price stability: Drop duration OK - Avg {avg_drop_duration:.1f} days "
                     f"<= {max_avg_drop_duration} day threshold ({len(drop_durations)} drops)"
                 )
         else:
-            logger.info("Price stability: STABLE - No significant drops detected")
+            logger.info("Price stability: No significant drops detected")
+        
+        # Set final flag
+        if not result['is_stable']:
+            result['stability_flag'] = 'Flagged - Review'
         
         return result
 
@@ -982,8 +1051,11 @@ def test_asin(asin: str) -> None:
         # Initialize Keepa API
         keepa_manager = KeepaAPIManager(Config.KEEPA_API_KEYS)
         if not keepa_manager.initialize_api():
-            print("❌ ERROR: Failed to initialize Keepa API")
-            return
+            print("⏳ Waiting for API tokens to regenerate...")
+            # Wait up to 10 minutes for tokens (they regenerate at ~1/min)
+            if not keepa_manager.wait_for_tokens_with_timeout(timeout=600):
+                print("❌ ERROR: Timed out waiting for API tokens")
+                return
         
         print(f"📡 Fetching product data from Keepa...")
         product_info = keepa_manager.get_product_info(asin)
@@ -1046,13 +1118,22 @@ def test_asin(asin: str) -> None:
         stability = PriceStabilityAnalyzer.analyze_stability(product_info)
         
         print(f"  Lookback Period: {Config.STABILITY_LOOKBACK_DAYS} days")
-        print(f"  Drop Threshold: {Config.DROP_THRESHOLD_PERCENT}% below normal")
+        print(f"  Required Drop from Median: {Config.DROP_THRESHOLD_PERCENT}%")
         print(f"  Max Avg Drop Duration: {Config.MAX_AVG_DROP_DURATION_DAYS} days")
         
-        if stability.get('normal_price'):
-            print(f"\n  Normal Price (75th %ile): ${stability['normal_price']:.2f}")
-            drop_level = stability['normal_price'] * (1 - Config.DROP_THRESHOLD_PERCENT / 100)
-            print(f"  Drop Level (25% below): ${drop_level:.2f}")
+        if stability.get('median_price'):
+            print(f"\n  Median Price (historical norm): ${stability['median_price']:.2f}")
+        
+        if stability.get('current_price'):
+            print(f"  Current Price: ${stability['current_price']:.2f}")
+        
+        if stability.get('drop_from_median_percent') is not None:
+            drop_pct = stability['drop_from_median_percent']
+            print(f"  Drop from Median: {drop_pct:.1f}%", end="")
+            if drop_pct < Config.DROP_THRESHOLD_PERCENT:
+                print(f" ⚠️  (need >{Config.DROP_THRESHOLD_PERCENT}% - not a real drop)")
+            else:
+                print(f" ✓ (above {Config.DROP_THRESHOLD_PERCENT}% threshold)")
         
         print(f"\n  Number of Drops: {stability['num_drops']}")
         print(f"  Avg Drop Duration: {stability['avg_drop_duration_days']} days")
@@ -1061,7 +1142,8 @@ def test_asin(asin: str) -> None:
             print(f"\n  ✅ Price Stability: STABLE")
         else:
             print(f"\n  ⚠️  Price Stability: FLAGGED FOR REVIEW")
-            print(f"     (Avg drop duration exceeds {Config.MAX_AVG_DROP_DURATION_DAYS} day threshold)")
+            for reason in stability.get('flag_reasons', []):
+                print(f"     • {reason}")
         
         # Final verdict
         print("\n" + "=" * 50)
